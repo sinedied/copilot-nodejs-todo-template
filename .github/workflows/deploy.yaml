@@ -1,0 +1,56 @@
+# This workflow for our node.js 20 app does the following:
+# - build the app
+# - login to Azure with AZURE_CREDENTIALS github secret
+# - run Azure CLI command to deploy
+
+name: Node.js 20 CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+
+    - name: npm install, build, and test
+      run: |
+        npm install
+        npm run build --if-present
+
+    - name: Login via Azure CLI
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Run Azure CLI script
+      run: |
+        # Create resource group rg-copilot-nodejs-todo
+        az group create --name rg-copilot-nodejs-todo --location eastus
+        # Create cosmosdb with default SQL api
+        az cosmosdb create --name cosmosdb-copilot-nodejs-todo --resource-group rg-copilot-nodejs-todo --kind GlobalDocumentDB --locations regionName="East US"
+        # Create database todos with collection tasks
+        az cosmosdb sql database create --account-name cosmosdb-copilot-nodejs-todo --name todos --resource-group rg-copilot-nodejs-todo
+        az cosmosdb sql container create --account-name cosmosdb-copilot-nodejs-todo --database-name todos --name tasks --partition-key-path /id --throughput 400 --resource-group rg-copilot-nodejs-todo
+        # Deploy webapp using node 20 using webapp up
+        az webapp up --name webapp-copilot-nodejs-todo-yla --resource-group rg-copilot-nodejs-todo --sku B1 --location eastus --runtime "NODE|20-lts"
+        # Retrieve cosmos endpoint
+        cosmosdb_endpoint=$(az cosmosdb show --name cosmosdb-copilot-nodejs-todo --resource-group rg-copilot-nodejs-todo --query "documentEndpoint" --output tsv)
+        # Retrieve cosmos key
+        cosmosdb_key=$(az cosmosdb keys list --name cosmosdb-copilot-nodejs-todo --resource-group rg-copilot-nodejs-todo --query "primaryMasterKey" --output tsv)
+        # Update webapp settings
+        az webapp config appsettings set --name webapp-copilot-nodejs-todo-yla --resource-group rg-copilot-nodejs-todo --settings "COSMOSDB_ENDPOINT=$cosmosdb_endpoint" "COSMOSDB_KEY=$cosmosdb_key" --output none
+
+
+
+
+
